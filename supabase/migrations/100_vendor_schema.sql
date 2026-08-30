@@ -473,6 +473,54 @@ GRANT EXECUTE ON FUNCTION public.get_marketplace_vendors(text, text, numeric, in
 
 
 -- -----------------------------------------------------------------------------
+-- 4.5 · Table privileges
+-- -----------------------------------------------------------------------------
+-- PostgREST checks role-level DML grants BEFORE consulting RLS. Without
+-- these, every query on a vendor_* table comes back as "permission denied
+-- for table X" with our RLS policies never getting a chance to run.
+--
+-- Pattern: broad DML to `authenticated`, plus SELECT to `anon` on the tables
+-- that expose the public marketplace surface. RLS then narrows each grant
+-- to the rows this specific caller is actually allowed to touch.
+GRANT USAGE ON SCHEMA public TO anon, authenticated;
+
+-- Vendor profile + team + taxonomy
+GRANT SELECT                             ON TABLE public.vendors               TO anon, authenticated;
+GRANT UPDATE                             ON TABLE public.vendors               TO authenticated;
+GRANT SELECT, INSERT, DELETE             ON TABLE public.vendor_members        TO authenticated;
+GRANT SELECT                             ON TABLE public.vendor_categories     TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE     ON TABLE public.vendor_category_map   TO authenticated;
+
+-- Rate card / portfolio / availability
+GRANT SELECT                             ON TABLE public.vendor_services       TO anon, authenticated;
+GRANT INSERT, UPDATE, DELETE             ON TABLE public.vendor_services       TO authenticated;
+GRANT SELECT                             ON TABLE public.vendor_service_addons TO anon, authenticated;
+GRANT INSERT, UPDATE, DELETE             ON TABLE public.vendor_service_addons TO authenticated;
+GRANT SELECT                             ON TABLE public.vendor_service_areas  TO anon, authenticated;
+GRANT INSERT, UPDATE, DELETE             ON TABLE public.vendor_service_areas  TO authenticated;
+GRANT SELECT                             ON TABLE public.vendor_portfolio      TO anon, authenticated;
+GRANT INSERT, UPDATE, DELETE             ON TABLE public.vendor_portfolio      TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE     ON TABLE public.vendor_availability   TO authenticated;
+
+-- RFQ / quote / booking pipeline (authenticated only — nothing here is
+-- public marketplace data)
+GRANT SELECT, INSERT, UPDATE, DELETE     ON TABLE public.rfqs                  TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE     ON TABLE public.rfq_invitees          TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE     ON TABLE public.quotes                TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE     ON TABLE public.quote_line_items      TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE     ON TABLE public.vendor_bookings       TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE     ON TABLE public.booking_milestones    TO authenticated;
+
+-- Messaging
+GRANT SELECT, INSERT, UPDATE             ON TABLE public.vendor_message_threads TO authenticated;
+GRANT SELECT, INSERT                     ON TABLE public.vendor_messages        TO authenticated;
+
+-- Reviews — publicly readable so the marketplace can render vendor cards
+GRANT SELECT                             ON TABLE public.vendor_reviews         TO anon, authenticated;
+GRANT INSERT                             ON TABLE public.vendor_reviews         TO authenticated;
+
+
+-- -----------------------------------------------------------------------------
 -- 5 · Row-level security
 -- -----------------------------------------------------------------------------
 -- Enable RLS (idempotent — no-op if already enabled).
