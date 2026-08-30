@@ -15,19 +15,36 @@ interface VendorAuthState {
   user: User | null;
   /** The vendor row this user is a member of, if any. */
   vendor: Vendor | null;
+  /**
+   * Signs the user in and enforces vendor-membership. If the email is a
+   * valid Supabase user but has no matching `vendor_members` row (e.g.
+   * an Illuxus organizer trying to use vendor portal), the session is
+   * torn down and an error is returned. Vendor auth is quarantined from
+   * the shared auth.users pool by this gate.
+   */
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   /**
-   * Creates the auth user and, when the project has email confirmation
-   * disabled (session returned immediately), also creates the vendor row
-   * via the `create_vendor_business` RPC. If confirmation is on, the row
-   * is created on the /vendor/signup page after first login.
+   * Fresh-account signup. Creates the auth user and, when the project has
+   * email confirmation disabled, also creates the vendor row via the
+   * `create_vendor_business` RPC.
    */
   signUp: (
     email: string,
     password: string,
     businessName: string,
   ) => Promise<{ error: Error | null }>;
-  /** Explicit business-creation path used by the signup page. */
+  /**
+   * "Existing Illuxus account" path — signs in with the given creds
+   * (bypassing the vendor-membership check) then immediately creates the
+   * vendor row. Used by the signup page's "I already have an Illuxus
+   * account" mode.
+   */
+  linkExistingAccount: (
+    email: string,
+    password: string,
+    businessName: string,
+  ) => Promise<{ error: Error | null }>;
+  /** Explicit business-creation path used when the user is already signed in. */
   createBusiness: (
     businessName: string,
   ) => Promise<{ error: Error | null }>;
@@ -113,13 +130,79 @@ export function VendorAuthProvider({ children }: { children: React.ReactNode }) 
 
   const signIn = React.useCallback(
     async (email: string, password: string) => {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
-      return { error };
+      if (error) return { error };
+
+      // auth.users is shared with the main Illuxus app, so a valid credential
+      // does NOT automatically grant access to the vendor portal. Enforce
+      // vendor membership explicitly and undo the session if the user isn't
+      // registered as a vendor.
+      const uid = data.user?.id;
+      if (!uid) {
+        await supabase.auth.signOut();
+        return { error: new Error("Sign-in failed. Please try again.") };
+      }
+
+      const { data: member, error: memberErr } = await supabase
+        .from("vendor_members")
+        .select("vendor_id")
+        .eq("user_id", uid)
+        .maybeSingle();
+
+      if (memberErr) {
+        await supabase.auth.signOut();
+        return { error: memberErr };
+      }
+
+      if (!member) {
+        await supabase.auth.signOut();
+        return {
+          error: new Error(
+            "This email isn't registered as a vendor. Sign up to create a vendor business.",
+          ),
+        };
+      }
+
+      return { error: null };
     },
     [],
+  );
+
+  /**
+   * "Existing Illuxus account" flow. Used by the signup page when a user
+   * already has an Illuxus login and wants to add a vendor business. We
+   * bypass the vendor-membership check in signIn() because the vendor row
+   * doesn't exist yet — we're about to create it in the same atomic call.
+   */
+  const linkExistingAccount = React.useCallback(
+    async (email: string, password: string, businessName: string) => {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (error) return { error };
+      const uid = data.user?.id;
+      if (!uid) {
+        await supabase.auth.signOut();
+        return { error: new Error("Sign-in failed") };
+      }
+
+      const { error: rpcErr } = await supabase.rpc(
+        "create_vendor_business",
+        { p_business_name: businessName },
+      );
+      if (rpcErr) {
+        // Rollback the session so the user isn't half-in.
+        await supabase.auth.signOut();
+        return { error: rpcErr };
+      }
+      await loadVendor(uid);
+      return { error: null };
+    },
+    [loadVendor],
   );
 
   const createBusiness = React.useCallback(
@@ -182,6 +265,7 @@ export function VendorAuthProvider({ children }: { children: React.ReactNode }) 
     vendor,
     signIn,
     signUp,
+    linkExistingAccount,
     createBusiness,
     signOut,
     refreshVendor,
