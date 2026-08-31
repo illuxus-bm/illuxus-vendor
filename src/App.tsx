@@ -7,6 +7,7 @@ import { RequireVendorAuth } from "@/components/auth/RequireVendorAuth";
 import { VendorProfileGate } from "@/components/auth/VendorProfileGate";
 import VendorLoginPage from "@/pages/vendor/VendorLoginPage";
 import VendorSignupPage from "@/pages/vendor/VendorSignupPage";
+import VendorOtpVerifyPage from "@/pages/vendor/VendorOtpVerifyPage";
 import VendorDashboardPage from "@/pages/vendor/VendorDashboardPage";
 import NotFound from "@/pages/NotFound";
 
@@ -33,6 +34,7 @@ export default function App() {
             {/* Public auth surfaces */}
             <Route path="/vendor/login" element={<VendorLoginPage />} />
             <Route path="/vendor/signup" element={<VendorSignupPage />} />
+            <Route path="/vendor/verify-otp" element={<VendorOtpVerifyPage />} />
 
             {/* Authenticated dashboard */}
             <Route

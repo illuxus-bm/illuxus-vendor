@@ -6,6 +6,9 @@ import type { Database } from "@/integrations/supabase/types";
 
 type Vendor = Database["public"]["Tables"]["vendors"]["Row"];
 
+/** Purpose of the email OTP — matches vendor_email_otps.purpose. */
+export type OtpPurpose = "login" | "signup" | "reverify" | "password_reset";
+
 interface VendorAuthState {
   /** True until the very first session probe completes. */
   loading: boolean;
@@ -16,13 +19,34 @@ interface VendorAuthState {
   /** The vendor row this user is a member of, if any. */
   vendor: Vendor | null;
   /**
-   * Signs the user in and enforces vendor-membership. If the email is a
-   * valid Supabase user but has no matching `vendor_members` row (e.g.
-   * an Illuxus organizer trying to use vendor portal), the session is
-   * torn down and an error is returned. Vendor auth is quarantined from
-   * the shared auth.users pool by this gate.
+   * Signs the user in, enforces vendor-membership, then IMMEDIATELY signs
+   * out and dispatches a login OTP. Returns `{ otpSent: true, email }` so
+   * the login page can navigate to /vendor/verify-otp. The real session
+   * doesn't exist until verifyOtp() succeeds server-side.
    */
-  signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
+  signIn: (
+    email: string,
+    password: string,
+  ) => Promise<
+    | { error: Error; otpSent?: never; email?: never }
+    | { error: null; otpSent: true; email: string }
+  >;
+  /** Dispatches a new OTP for the given email (used by "resend code"). */
+  sendOtp: (
+    email: string,
+    purpose: OtpPurpose,
+  ) => Promise<{ error: Error | null }>;
+  /**
+   * Verifies the OTP code server-side and, on success, exchanges the
+   * returned magic-link token for a real Supabase session. After this
+   * call `session` and `user` in the context will populate via the auth
+   * state change listener.
+   */
+  verifyOtp: (
+    email: string,
+    code: string,
+    purpose: OtpPurpose,
+  ) => Promise<{ error: Error | null }>;
   /**
    * Fresh-account signup. Creates the auth user and, when the project has
    * email confirmation disabled, also creates the vendor row via the
@@ -130,16 +154,16 @@ export function VendorAuthProvider({ children }: { children: React.ReactNode }) 
 
   const signIn = React.useCallback(
     async (email: string, password: string) => {
+      const normalizedEmail = email.trim().toLowerCase();
       const { data, error } = await supabase.auth.signInWithPassword({
-        email,
+        email: normalizedEmail,
         password,
       });
       if (error) return { error };
 
       // auth.users is shared with the main Illuxus app, so a valid credential
       // does NOT automatically grant access to the vendor portal. Enforce
-      // vendor membership explicitly and undo the session if the user isn't
-      // registered as a vendor.
+      // vendor membership BEFORE moving on to the OTP step.
       const uid = data.user?.id;
       if (!uid) {
         await supabase.auth.signOut();
@@ -165,6 +189,68 @@ export function VendorAuthProvider({ children }: { children: React.ReactNode }) 
           ),
         };
       }
+
+      // Password and vendor-membership are both valid. Tear the session
+      // down — we don't consider the user authenticated until the email
+      // OTP is verified server-side and exchanges into a fresh session.
+      await supabase.auth.signOut();
+
+      // Dispatch a login OTP. If Resend / SMTP is misconfigured this errors
+      // out and the login page will surface the message.
+      const { error: sendErr } = await supabase.functions.invoke(
+        "send-vendor-otp",
+        { body: { email: normalizedEmail, purpose: "login" } },
+      );
+      if (sendErr) {
+        return {
+          error: new Error(
+            sendErr.message ?? "Could not send verification code",
+          ),
+        };
+      }
+
+      return { error: null, otpSent: true as const, email: normalizedEmail };
+    },
+    [],
+  );
+
+  const sendOtp = React.useCallback(
+    async (email: string, purpose: OtpPurpose) => {
+      const { error } = await supabase.functions.invoke("send-vendor-otp", {
+        body: { email: email.trim().toLowerCase(), purpose },
+      });
+      return { error: error ? new Error(error.message ?? "Send failed") : null };
+    },
+    [],
+  );
+
+  const verifyOtp = React.useCallback(
+    async (email: string, code: string, purpose: OtpPurpose) => {
+      const normalizedEmail = email.trim().toLowerCase();
+
+      // Step 1 — server-side code verification. Returns a magic-link
+      // hashed_token we can exchange for a session.
+      const { data, error } = await supabase.functions.invoke(
+        "verify-vendor-otp",
+        { body: { email: normalizedEmail, code, purpose } },
+      );
+      if (error) {
+        return { error: new Error(error.message ?? "Verification failed") };
+      }
+      const tokenHash = (data as { token_hash?: string } | null)?.token_hash;
+      if (!tokenHash) {
+        return { error: new Error("Server did not return a session token") };
+      }
+
+      // Step 2 — trade the magic-link token for a real Supabase session.
+      // From this point on the user is authenticated and onAuthStateChange
+      // will populate `session` / `user` / `vendor` in the context.
+      const { error: verifyErr } = await supabase.auth.verifyOtp({
+        email: normalizedEmail,
+        token_hash: tokenHash,
+        type: "magiclink",
+      });
+      if (verifyErr) return { error: verifyErr };
 
       return { error: null };
     },
@@ -264,6 +350,8 @@ export function VendorAuthProvider({ children }: { children: React.ReactNode }) 
     user,
     vendor,
     signIn,
+    sendOtp,
+    verifyOtp,
     signUp,
     linkExistingAccount,
     createBusiness,

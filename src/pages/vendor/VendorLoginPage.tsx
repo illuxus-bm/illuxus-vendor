@@ -12,6 +12,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useVendorAuth } from "@/contexts/VendorAuthContext";
 
+const PENDING_EMAIL_KEY = "illuxus-vendor.pending-otp-email";
+
 const schema = z.object({
   email: z.string().email("Enter a valid email"),
   password: z.string().min(6, "Use at least 6 characters"),
@@ -19,18 +21,13 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>;
 
-/**
- * Guards the "next" URL to same-origin absolute paths only, so a crafted
- * `?next=//evil.com` can't turn our login into an open redirect.
- */
+/** Guards `?next=` to same-origin paths, blocks open-redirect. */
 function safeNext(candidate: string | null): string {
   if (!candidate) return "/vendor";
   if (!candidate.startsWith("/") || candidate.startsWith("//")) return "/vendor";
   return candidate;
 }
 
-/** Recognises the "you're on Illuxus but not a vendor" error so we can render
- *  a helpful inline hint with a link to the signup page. */
 function isNotAVendorError(message: string): boolean {
   return /isn'?t registered as a vendor/i.test(message);
 }
@@ -51,24 +48,27 @@ export default function VendorLoginPage() {
     defaultValues: { email: "", password: "" },
   });
 
-  // Already signed in AND registered as a vendor? Skip the form.
+  // Already fully signed in AND a vendor? Skip the form.
   React.useEffect(() => {
     if (user && vendor) navigate(next, { replace: true });
   }, [user, vendor, next, navigate]);
 
   const onSubmit = async (values: FormValues) => {
     setFormError(null);
-    const { error } = await signIn(values.email, values.password);
-    if (error) {
-      const msg = error.message ?? "Sign in failed";
+    const result = await signIn(values.email, values.password);
+    if (result.error) {
+      const msg = result.error.message ?? "Sign in failed";
       setFormError(msg);
-      // Skip the toast when we're showing the inline "not a vendor" hint —
-      // one clear message per failure is enough.
       if (!isNotAVendorError(msg)) toast.error(msg);
       return;
     }
-    toast.success("Welcome back");
-    navigate(next, { replace: true });
+    // Password + vendor-membership were both valid; signIn tore the
+    // temporary session down and dispatched an email OTP. Move on to the
+    // verify step — real session only exists after that succeeds.
+    sessionStorage.setItem(PENDING_EMAIL_KEY, result.email);
+    toast.success("Code sent to your email");
+    const params = new URLSearchParams({ email: result.email, next });
+    navigate(`/vendor/verify-otp?${params.toString()}`, { replace: true });
   };
 
   return (
@@ -76,7 +76,10 @@ export default function VendorLoginPage() {
       footer={
         <>
           New here?{" "}
-          <Link to="/vendor/signup" className="font-medium text-foreground hover:underline">
+          <Link
+            to="/vendor/signup"
+            className="font-medium text-foreground hover:underline"
+          >
             Create a vendor account
           </Link>
         </>
@@ -85,7 +88,7 @@ export default function VendorLoginPage() {
       <div className="space-y-1.5 text-center">
         <h1 className="text-2xl font-semibold tracking-tight">Sign in</h1>
         <p className="text-sm text-muted-foreground">
-          Manage your services, quotes, and bookings.
+          We'll email you a code to confirm it's you.
         </p>
       </div>
 
@@ -118,8 +121,6 @@ export default function VendorLoginPage() {
           ) : null}
         </div>
 
-        {/* Inline explainer when someone signs in with a valid Illuxus
-            credential that isn't registered as a vendor. */}
         {formError && isNotAVendorError(formError) ? (
           <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
             {formError}{" "}
@@ -133,7 +134,11 @@ export default function VendorLoginPage() {
         ) : null}
 
         <Button type="submit" className="w-full" disabled={isSubmitting}>
-          {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Continue"}
+          {isSubmitting ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            "Send verification code"
+          )}
         </Button>
       </form>
     </AuthShell>
