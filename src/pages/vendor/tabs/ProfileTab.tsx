@@ -13,6 +13,11 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useVendorAuth } from "@/contexts/VendorAuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  pathFromPublicUrl,
+  removeVendorObject,
+  uploadVendorImage,
+} from "@/lib/uploads";
 
 const DEFAULT_AUTO_REPLY =
   "Thanks for reaching out! I'll review your brief and respond within 24 hours.";
@@ -50,10 +55,12 @@ type FormValues = z.infer<typeof schema>;
 /**
  * Profile tab — the biggest form in the app.
  *
- * Writes back to `vendors` using the actual columns in the shared schema:
- *   • Social URLs → `socials` jsonb ({ instagram, linkedin, facebook, youtube })
- *   • `notify_email` (boolean) — was called email_notifications in my earlier draft
- *   • `default_currency` stays untouched here (change flow lives in Settings later)
+ * Sections (top to bottom):
+ *   1. Cover & logo         — media uploads to vendor-media bucket
+ *   2. Business details     — name, website, city, country, YoE, response time, tagline, bio
+ *   3. Social links         — Instagram, LinkedIn, Facebook, YouTube (packed into socials jsonb)
+ *   4. Preferences          — notify_email toggle + auto-reply textarea
+ *   5. Save profile
  */
 export default function ProfileTab() {
   const { vendor, refreshVendor } = useVendorAuth();
@@ -86,9 +93,9 @@ export default function ProfileTab() {
     try {
       const socials: Record<string, string> = {};
       if (values.instagram_url) socials.instagram = values.instagram_url;
-      if (values.linkedin_url) socials.linkedin  = values.linkedin_url;
-      if (values.facebook_url) socials.facebook  = values.facebook_url;
-      if (values.youtube_url)  socials.youtube   = values.youtube_url;
+      if (values.linkedin_url) socials.linkedin = values.linkedin_url;
+      if (values.facebook_url) socials.facebook = values.facebook_url;
+      if (values.youtube_url) socials.youtube = values.youtube_url;
 
       const patch = {
         business_name: values.business_name,
@@ -119,61 +126,7 @@ export default function ProfileTab() {
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-      {/* -------- Cover & logo -------- */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">Cover &amp; logo</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="relative flex aspect-[16/5] w-full items-center justify-center rounded-lg border border-dashed border-border/70 bg-secondary/40">
-            {vendor?.cover_url ? (
-              <img
-                src={vendor.cover_url}
-                alt=""
-                className="h-full w-full rounded-lg object-cover"
-              />
-            ) : (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <ImageIcon className="h-4 w-4" />
-                No cover image
-              </div>
-            )}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="absolute bottom-3 right-3 bg-background"
-              onClick={() => toast.info("Cover upload wires in the Supabase phase")}
-            >
-              <Upload className="h-3.5 w-3.5" />
-              Change cover
-            </Button>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-md border border-border/70 bg-secondary/40">
-              {vendor?.logo_url ? (
-                <img
-                  src={vendor.logo_url}
-                  alt=""
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <ImageIcon className="h-5 w-5 text-muted-foreground" />
-              )}
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => toast.info("Logo upload wires in the Supabase phase")}
-            >
-              <Upload className="h-3.5 w-3.5" />
-              Upload logo
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      <CoverAndLogoCard />
 
       {/* -------- Business details -------- */}
       <Card>
@@ -198,7 +151,13 @@ export default function ProfileTab() {
               <Input id="years_experience" type="number" min={0} {...register("years_experience")} />
             </Field>
             <Field label="Avg response time (hours)" htmlFor="response_time_hours">
-              <Input id="response_time_hours" type="number" min={0} placeholder="e.g. 2" {...register("response_time_hours")} />
+              <Input
+                id="response_time_hours"
+                type="number"
+                min={0}
+                placeholder="e.g. 2"
+                {...register("response_time_hours")}
+              />
             </Field>
             <Field label="Short tagline" htmlFor="tagline" className="sm:col-span-2">
               <Input id="tagline" placeholder="One-liner shown on marketplace card" {...register("tagline")} />
@@ -284,6 +243,158 @@ export default function ProfileTab() {
         </Button>
       </div>
     </form>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Cover + Logo — real uploads to the vendor-media bucket                   */
+/* -------------------------------------------------------------------------- */
+
+function CoverAndLogoCard() {
+  const { vendor, refreshVendor } = useVendorAuth();
+  const [uploadingCover, setUploadingCover] = React.useState(false);
+  const [uploadingLogo, setUploadingLogo] = React.useState(false);
+  const coverInputRef = React.useRef<HTMLInputElement>(null);
+  const logoInputRef = React.useRef<HTMLInputElement>(null);
+
+  const upload = async (kind: "logo" | "cover", file: File) => {
+    if (!vendor) {
+      toast.error("Vendor profile not loaded");
+      return;
+    }
+    const setBusy = kind === "logo" ? setUploadingLogo : setUploadingCover;
+    setBusy(true);
+    try {
+      const result = await uploadVendorImage(file, vendor.id, kind);
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+
+      const column = kind === "logo" ? "logo_url" : "cover_url";
+      const previousUrl =
+        kind === "logo" ? vendor.logo_url : vendor.cover_url;
+
+      const { error } = await supabase
+        .from("vendors")
+        .update({ [column]: result.url })
+        .eq("id", vendor.id);
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+
+      // Best-effort cleanup of the previous file so orphans don't accumulate.
+      const oldPath = pathFromPublicUrl(previousUrl);
+      if (oldPath && oldPath !== result.path) {
+        void removeVendorObject(oldPath);
+      }
+
+      await refreshVendor();
+      toast.success(kind === "logo" ? "Logo updated" : "Cover updated");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onCoverChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) await upload("cover", file);
+    // Reset so selecting the same file again re-fires onChange.
+    e.target.value = "";
+  };
+
+  const onLogoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) await upload("logo", file);
+    e.target.value = "";
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm">Cover &amp; logo</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Hidden inputs triggered by the buttons below. */}
+        <input
+          ref={coverInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          className="hidden"
+          onChange={onCoverChange}
+        />
+        <input
+          ref={logoInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          className="hidden"
+          onChange={onLogoChange}
+        />
+
+        <div className="relative flex aspect-[16/5] w-full items-center justify-center overflow-hidden rounded-lg border border-dashed border-border/70 bg-secondary/40">
+          {vendor?.cover_url ? (
+            <img
+              src={vendor.cover_url}
+              alt=""
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <ImageIcon className="h-4 w-4" />
+              No cover image
+            </div>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="absolute bottom-3 right-3 bg-background"
+            onClick={() => coverInputRef.current?.click()}
+            disabled={uploadingCover}
+          >
+            {uploadingCover ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Upload className="h-3.5 w-3.5" />
+            )}
+            {uploadingCover ? "Uploading…" : "Change cover"}
+          </Button>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-md border border-border/70 bg-secondary/40">
+            {vendor?.logo_url ? (
+              <img
+                src={vendor.logo_url}
+                alt=""
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <ImageIcon className="h-5 w-5 text-muted-foreground" />
+            )}
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => logoInputRef.current?.click()}
+            disabled={uploadingLogo}
+          >
+            {uploadingLogo ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Upload className="h-3.5 w-3.5" />
+            )}
+            {uploadingLogo ? "Uploading…" : "Upload logo"}
+          </Button>
+        </div>
+
+        <p className="text-xs text-muted-foreground">
+          JPG, PNG, or WEBP · max 5 MB.
+        </p>
+      </CardContent>
+    </Card>
   );
 }
 
