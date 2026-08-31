@@ -17,7 +17,17 @@
 //   RESEND_FROM_EMAIL                        (e.g. "Illuxus <no-reply@illuxus.com>")
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
-import { corsHeaders } from "../_shared/cors.ts";
+
+// CORS headers are inlined (not imported from ../_shared/) because the
+// Supabase Dashboard bundler only uploads a single function directory —
+// relative imports outside it fail with "Module not found". Keeping this
+// file self-contained means either the CLI or the dashboard can ship it.
+const corsHeaders: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
