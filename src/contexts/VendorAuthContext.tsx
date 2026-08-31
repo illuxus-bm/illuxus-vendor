@@ -192,22 +192,18 @@ export function VendorAuthProvider({ children }: { children: React.ReactNode }) 
 
       // Password and vendor-membership are both valid. Tear the session
       // down — we don't consider the user authenticated until the email
-      // OTP is verified server-side and exchanges into a fresh session.
+      // OTP is verified.
       await supabase.auth.signOut();
 
-      // Dispatch a login OTP. If Resend / SMTP is misconfigured this errors
-      // out and the login page will surface the message.
-      const { error: sendErr } = await supabase.functions.invoke(
-        "send-vendor-otp",
-        { body: { email: normalizedEmail, purpose: "login" } },
-      );
-      if (sendErr) {
-        return {
-          error: new Error(
-            sendErr.message ?? "Could not send verification code",
-          ),
-        };
-      }
+      // Dispatch a login OTP via Supabase's built-in flow. This uses the
+      // SMTP already configured on Supabase Auth and the Auth email
+      // template (customize it in Supabase → Auth → Email Templates →
+      // "Magic Link"). No custom edge function or Resend required.
+      const { error: sendErr } = await supabase.auth.signInWithOtp({
+        email: normalizedEmail,
+        options: { shouldCreateUser: false },
+      });
+      if (sendErr) return { error: sendErr };
 
       return { error: null, otpSent: true as const, email: normalizedEmail };
     },
@@ -215,44 +211,27 @@ export function VendorAuthProvider({ children }: { children: React.ReactNode }) 
   );
 
   const sendOtp = React.useCallback(
-    async (email: string, purpose: OtpPurpose) => {
-      const { error } = await supabase.functions.invoke("send-vendor-otp", {
-        body: { email: email.trim().toLowerCase(), purpose },
+    async (email: string, _purpose: OtpPurpose) => {
+      const { error } = await supabase.auth.signInWithOtp({
+        email: email.trim().toLowerCase(),
+        options: { shouldCreateUser: false },
       });
-      return { error: error ? new Error(error.message ?? "Send failed") : null };
+      return { error };
     },
     [],
   );
 
   const verifyOtp = React.useCallback(
-    async (email: string, code: string, purpose: OtpPurpose) => {
-      const normalizedEmail = email.trim().toLowerCase();
-
-      // Step 1 — server-side code verification. Returns a magic-link
-      // hashed_token we can exchange for a session.
-      const { data, error } = await supabase.functions.invoke(
-        "verify-vendor-otp",
-        { body: { email: normalizedEmail, code, purpose } },
-      );
-      if (error) {
-        return { error: new Error(error.message ?? "Verification failed") };
-      }
-      const tokenHash = (data as { token_hash?: string } | null)?.token_hash;
-      if (!tokenHash) {
-        return { error: new Error("Server did not return a session token") };
-      }
-
-      // Step 2 — trade the magic-link token for a real Supabase session.
-      // From this point on the user is authenticated and onAuthStateChange
-      // will populate `session` / `user` / `vendor` in the context.
-      const { error: verifyErr } = await supabase.auth.verifyOtp({
-        email: normalizedEmail,
-        token_hash: tokenHash,
-        type: "magiclink",
+    async (email: string, code: string, _purpose: OtpPurpose) => {
+      // Uses Supabase's native email-OTP verification. The session is
+      // established as a side-effect on success; onAuthStateChange
+      // then populates `session` / `user` / `vendor` in this context.
+      const { error } = await supabase.auth.verifyOtp({
+        email: email.trim().toLowerCase(),
+        token: code.trim(),
+        type: "email",
       });
-      if (verifyErr) return { error: verifyErr };
-
-      return { error: null };
+      return { error };
     },
     [],
   );
