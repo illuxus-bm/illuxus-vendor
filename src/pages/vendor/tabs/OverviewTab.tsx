@@ -21,6 +21,12 @@ import { useMyReviews } from "@/hooks/useMyReviews";
 import { useMyBookings } from "@/hooks/useMyBookings";
 import { formatMoneyCents } from "@/lib/utils";
 
+interface OverviewTabProps {
+  /** Switch to another dashboard tab. Wired from VendorDashboardPage so the
+   *  "Complete profile" CTA on this tab can jump to the Profile tab. */
+  onSwitchTab?: (tab: string) => void;
+}
+
 /**
  * Overview tab — landing page for the dashboard.
  *
@@ -29,7 +35,7 @@ import { formatMoneyCents } from "@/lib/utils";
  *   [ Upcoming bookings              ] [ Profile strength           ]
  *   [ Recent reviews (full width)                                    ]
  */
-export default function OverviewTab() {
+export default function OverviewTab({ onSwitchTab }: OverviewTabProps) {
   const { vendor } = useVendorAuth();
   const { data: stats, isLoading: statsLoading } = useVendorDashboardStats();
   const { data: reviews = [], isLoading: reviewsLoading } = useMyReviews();
@@ -147,7 +153,12 @@ export default function OverviewTab() {
                 </li>
               ))}
             </ul>
-            <Button variant="outline" size="sm" className="w-full justify-between">
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full justify-between"
+              onClick={() => onSwitchTab?.("profile")}
+            >
               Complete profile
               <ArrowRight className="h-3.5 w-3.5" />
             </Button>

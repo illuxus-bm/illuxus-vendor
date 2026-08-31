@@ -81,7 +81,10 @@ export default function VendorDashboardPage() {
               const Component = t.Component;
               return (
                 <TabsContent key={t.value} value={t.value} className="mt-6">
-                  <Component />
+                  {/* Overview is the only tab that needs to redirect to
+                      another tab (via the "Complete profile" CTA). Passing
+                      an unrecognized prop to the others is harmless. */}
+                  <Component onSwitchTab={setActive as (tab: string) => void} />
                 </TabsContent>
               );
             })}

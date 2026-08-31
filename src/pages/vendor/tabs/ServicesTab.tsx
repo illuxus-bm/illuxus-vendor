@@ -1,20 +1,38 @@
-import { Plus, Zap } from "lucide-react";
-import { toast } from "sonner";
+import * as React from "react";
+import { Pencil, Plus, Zap } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ServiceEditorDialog } from "@/components/vendor/ServiceEditorDialog";
 import { useMyServices, type MyService } from "@/hooks/useMyServices";
 import { formatMoneyCents } from "@/lib/utils";
 
 /**
- * Services (rate card). Add / edit dialog will land in a follow-up — the
- * button surfaces a toast for now so the empty-state matches the design.
+ * Services / rate card tab.
+ *
+ *   [ header card + Add service button ]
+ *   [ row ]  ← click to edit, hover pencil
+ *   [ row ]
+ *
+ * "Add service" opens ServiceEditorDialog in add-mode. Clicking a row or its
+ * pencil icon opens the same dialog in edit-mode (with a Delete button).
  */
 export default function ServicesTab() {
   const { data: services = [], isLoading, error } = useMyServices();
+  const [open, setOpen] = React.useState(false);
+  const [editing, setEditing] = React.useState<MyService | null>(null);
+
+  const openAdd = () => {
+    setEditing(null);
+    setOpen(true);
+  };
+  const openEdit = (s: MyService) => {
+    setEditing(s);
+    setOpen(true);
+  };
 
   return (
     <div className="space-y-4">
@@ -27,10 +45,7 @@ export default function ServicesTab() {
               request a custom quote.
             </p>
           </div>
-          <Button
-            size="sm"
-            onClick={() => toast.info("Service editor lands in the next iteration")}
-          >
+          <Button size="sm" onClick={openAdd}>
             <Plus className="h-4 w-4" />
             Add service
           </Button>
@@ -46,20 +61,35 @@ export default function ServicesTab() {
       ) : (
         <div className="space-y-3">
           {services.map((s) => (
-            <ServiceRow key={s.id} s={s} />
+            <ServiceRow key={s.id} s={s} onEdit={() => openEdit(s)} />
           ))}
         </div>
       )}
+
+      <ServiceEditorDialog
+        open={open}
+        onOpenChange={setOpen}
+        service={editing}
+      />
     </div>
   );
 }
 
-function ServiceRow({ s }: { s: MyService }) {
+function ServiceRow({
+  s,
+  onEdit,
+}: {
+  s: MyService;
+  onEdit: () => void;
+}) {
   return (
-    <Card>
+    <Card
+      className="group cursor-pointer transition-colors hover:border-foreground/20"
+      onClick={onEdit}
+    >
       <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h3 className="truncate text-sm font-semibold text-foreground">
               {s.title}
             </h3>
@@ -69,9 +99,9 @@ function ServiceRow({ s }: { s: MyService }) {
                 Instant
               </Badge>
             ) : null}
-            {!s.is_active ? <Badge variant="outline">Inactive</Badge> : null}
+            {!s.is_active ? <Badge variant="outline">Hidden</Badge> : null}
             {s.quote_on_request ? (
-              <Badge variant="outline">Quote-on-request</Badge>
+              <Badge variant="outline">Quotes accepted</Badge>
             ) : null}
           </div>
           {s.description ? (
@@ -80,11 +110,25 @@ function ServiceRow({ s }: { s: MyService }) {
             </p>
           ) : null}
         </div>
-        <div className="num text-sm font-medium text-foreground">
-          {formatMoneyCents(s.base_price, s.currency)}
-          <span className="ml-1 text-xs text-muted-foreground">
-            / {s.unit.replace("_", " ")}
-          </span>
+        <div className="flex items-center gap-3">
+          <div className="num text-sm font-medium text-foreground">
+            {formatMoneyCents(s.base_price, s.currency)}
+            <span className="ml-1 text-xs text-muted-foreground">
+              / {s.unit.replace("_", " ")}
+            </span>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100"
+            aria-label="Edit service"
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit();
+            }}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
         </div>
       </CardContent>
     </Card>
