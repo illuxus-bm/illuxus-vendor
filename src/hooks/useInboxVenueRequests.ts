@@ -24,6 +24,11 @@ export type VenueRequestStatus =
   | "declined"
   | "cancelled";
 
+export interface InboxVenueRequestService {
+  id: string;
+  title: string;
+}
+
 export interface InboxVenueRequest {
   selection_id: string;
   event_id: string;
@@ -38,6 +43,11 @@ export interface InboxVenueRequest {
    *  `event_venue_selections.created_at`. */
   created_at: string;
   responded_at: string | null;
+  /** Services the organizer ticked in the picker. Resolved to full
+   *  {id, title} pairs via a second query — ids the organizer selected
+   *  but the vendor has since deleted are dropped. Persisted in
+   *  `event_venue_selections.selected_service_ids` (migration 032). */
+  requested_services: InboxVenueRequestService[];
 }
 
 interface RawRow {
@@ -47,6 +57,7 @@ interface RawRow {
   status: VenueRequestStatus;
   created_at: string;
   responded_at: string | null;
+  selected_service_ids: string[] | null;
   events: {
     title: string | null;
     date: string | null;
@@ -85,13 +96,58 @@ export function useInboxVenueRequests() {
         .from("event_venue_selections")
         .select(
           `id, event_id, notes, status, created_at, responded_at,
+           selected_service_ids,
            events!inner ( title, date, location, venue, capacity )`,
         )
         .eq("vendor_id", vendor!.id)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
-      return (data ?? []).map((row) => ({
+      const rows = data ?? [];
+
+      // Collect every service id referenced across all rows into one
+      // batch fetch — avoids an N+1 when the vendor has multiple pending
+      // requests. RLS on vendor_services is public-read (migration 100)
+      // so this works even for non-owner viewers, but we scope by
+      // vendor_id anyway to keep the response tight.
+      const allServiceIds = Array.from(
+        new Set(
+          rows.flatMap((r) => r.selected_service_ids ?? []),
+        ),
+      );
+
+      const serviceTitleById = new Map<string, string>();
+      if (allServiceIds.length > 0) {
+        const { data: services } = await (
+          supabase as unknown as {
+            from: (t: string) => {
+              select: (s: string) => {
+                in: (
+                  c: string,
+                  ids: string[],
+                ) => {
+                  eq: (
+                    c: string,
+                    v: string,
+                  ) => Promise<{
+                    data: Array<{ id: string; title: string }> | null;
+                  }>;
+                };
+              };
+            };
+          }
+        )
+          .from("vendor_services")
+          .select("id, title")
+          .in("id", allServiceIds)
+          .eq("vendor_id", vendor!.id);
+
+        for (const s of services ?? []) {
+          serviceTitleById.set(s.id, s.title);
+        }
+      }
+
+      return rows.map((row) => ({
         selection_id: row.id,
         event_id: row.event_id,
         event_title: row.events?.title ?? null,
@@ -106,6 +162,12 @@ export function useInboxVenueRequests() {
         status: row.status,
         created_at: row.created_at,
         responded_at: row.responded_at,
+        requested_services: (row.selected_service_ids ?? [])
+          .map((id) => {
+            const title = serviceTitleById.get(id);
+            return title ? { id, title } : null;
+          })
+          .filter((s): s is InboxVenueRequestService => s !== null),
       }));
     },
   });

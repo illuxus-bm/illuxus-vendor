@@ -1,7 +1,7 @@
 import * as React from "react";
 import { formatDistanceToNow } from "date-fns";
 import { useQueryClient } from "@tanstack/react-query";
-import { Building2, MapPin, Users } from "lucide-react";
+import { Building2, ListChecks, MapPin, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -366,6 +366,27 @@ function VenueRequestRow({ request }: { request: InboxVenueRequest }) {
             <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
               {request.notes}
             </p>
+          ) : null}
+
+          {/* Services the organizer explicitly ticked when they picked
+              this vendor. Empty when the organizer sent a plain "we want
+              this venue" request without service specifics. */}
+          {request.requested_services.length > 0 ? (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <span className="inline-flex items-center gap-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                <ListChecks className="h-3 w-3" />
+                Requested
+              </span>
+              {request.requested_services.map((s) => (
+                <Badge
+                  key={s.id}
+                  variant="outline"
+                  className="border-primary/30 bg-primary/5 text-foreground"
+                >
+                  {s.title}
+                </Badge>
+              ))}
+            </div>
           ) : null}
 
           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
