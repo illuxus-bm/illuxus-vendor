@@ -25,7 +25,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { supabase } from "@/integrations/supabase/client";
 import { useVendorAuth } from "@/contexts/VendorAuthContext";
 import { useMyBookings, type MyBooking } from "@/hooks/useMyBookings";
+import {
+  useInboxVenueRequests,
+  type InboxVenueRequest,
+} from "@/hooks/useInboxVenueRequests";
 import { formatMoneyCents } from "@/lib/utils";
+import { Building2, ListChecks, MapPin, Users } from "lucide-react";
 
 const FILTERS: { value: MyBooking["status"] | "all"; label: string }[] = [
   { value: "all", label: "All" },
@@ -48,8 +53,21 @@ export default function BookingsTab() {
     "all",
   );
   const { data: bookings = [], isLoading, error } = useMyBookings();
+  // Venue bookings live in a separate table (event_venue_selections) with a
+  // different lifecycle to vendor_bookings — there's no pending / quoted
+  // negotiation step, and the vendor already accepted or declined via the
+  // Inbox. Show them here as a first-class booking anyway so the vendor
+  // has one home for "here's what I'm on the hook for". Kept in a distinct
+  // section because the transition actions (Confirm / In progress /
+  // Completed) don't apply.
+  const { data: venueRequests = [], isLoading: venueLoading } =
+    useInboxVenueRequests();
+  const venueBookings = React.useMemo(
+    () => venueRequests.filter((r) => r.status === "accepted"),
+    [venueRequests],
+  );
 
-  if (isLoading) {
+  if (isLoading || venueLoading) {
     return (
       <div className="space-y-3">
         <Skeleton className="h-20 w-full rounded-xl" />
@@ -64,6 +82,12 @@ export default function BookingsTab() {
   const filtered = bookings.filter(
     (b) => filter === "all" || b.status === filter,
   );
+  // Venue bookings only show under All + Confirmed (they're effectively
+  // confirmed the moment the vendor accepts the request). Filter Pending /
+  // In progress / Completed / Cancelled hides them so the pipeline view
+  // stays honest to the RFQ→booking flow.
+  const showVenueSection =
+    (filter === "all" || filter === "confirmed") && venueBookings.length > 0;
 
   return (
     <div className="space-y-4">
@@ -83,16 +107,114 @@ export default function BookingsTab() {
         ))}
       </div>
 
-      {filtered.length === 0 ? (
-        <EmptyState message="No bookings yet." />
-      ) : (
-        <div className="space-y-3">
-          {filtered.map((b) => (
-            <BookingRow key={b.id} b={b} />
-          ))}
-        </div>
+      {showVenueSection && (
+        <section className="space-y-2">
+          <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
+            Venue bookings ({venueBookings.length})
+          </h3>
+          <div className="space-y-3">
+            {venueBookings.map((r) => (
+              <VenueBookingRow key={r.selection_id} request={r} />
+            ))}
+          </div>
+        </section>
       )}
+
+      {filtered.length === 0 && !showVenueSection ? (
+        <EmptyState message="No bookings yet." />
+      ) : filtered.length > 0 ? (
+        <section className="space-y-2">
+          {showVenueSection && (
+            <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
+              Service bookings ({filtered.length})
+            </h3>
+          )}
+          <div className="space-y-3">
+            {filtered.map((b) => (
+              <BookingRow key={b.id} b={b} />
+            ))}
+          </div>
+        </section>
+      ) : null}
     </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Venue booking row — read-only view of an accepted event_venue_selections   */
+/* row. No transition menu; if the vendor wants to back out they cancel the   */
+/* row (that's a separate flow we haven't wired yet — reach the organizer     */
+/* out-of-band via Contact venue on their side for now).                      */
+/* -------------------------------------------------------------------------- */
+
+function VenueBookingRow({ request }: { request: InboxVenueRequest }) {
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge
+              variant="secondary"
+              className="border-sky-200 bg-sky-50 text-sky-700"
+            >
+              <Building2 className="mr-1 h-3 w-3" />
+              Venue booking
+            </Badge>
+            <Badge
+              variant="outline"
+              className="border-emerald-200 bg-emerald-50 text-emerald-700"
+            >
+              Accepted
+            </Badge>
+          </div>
+
+          <p className="mt-2 truncate text-sm font-medium text-foreground">
+            {request.event_title || "(untitled event)"}
+          </p>
+          {request.notes ? (
+            <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+              {request.notes}
+            </p>
+          ) : null}
+
+          {request.requested_services.length > 0 ? (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <span className="inline-flex items-center gap-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                <ListChecks className="h-3 w-3" />
+                Requested
+              </span>
+              {request.requested_services.map((s) => (
+                <Badge
+                  key={s.id}
+                  variant="outline"
+                  className="border-primary/30 bg-primary/5 text-foreground"
+                >
+                  {s.title}
+                </Badge>
+              ))}
+            </div>
+          ) : null}
+
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+            {request.event_city ? (
+              <span className="inline-flex items-center gap-1">
+                <MapPin className="h-3 w-3" />
+                {request.event_city}
+              </span>
+            ) : null}
+            {request.event_date ? (
+              <span>{new Date(request.event_date).toLocaleDateString()}</span>
+            ) : null}
+            {request.event_capacity ? (
+              <span className="inline-flex items-center gap-1">
+                <Users className="h-3 w-3" />
+                {request.event_capacity} capacity
+              </span>
+            ) : null}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
