@@ -12,6 +12,11 @@ import { useVendorAuth } from "@/contexts/VendorAuthContext";
  *
  * Segmentation into New / Responded / Expired lives in the tab component
  * (mirrors InboxRfq) so we only round-trip once.
+ *
+ * Column note: `event_venue_selections` uses `created_at` for the moment
+ * the organizer picked the vendor (there is NO `contacted_at` column —
+ * an earlier draft of this hook referenced one and every query errored
+ * out with 42703, silently draining the Inbox).
  */
 export type VenueRequestStatus =
   | "contacted"
@@ -29,7 +34,9 @@ export interface InboxVenueRequest {
   event_capacity: number | null;
   notes: string | null;
   status: VenueRequestStatus;
-  contacted_at: string;
+  /** When the organizer picked this vendor. Sourced from
+   *  `event_venue_selections.created_at`. */
+  created_at: string;
   responded_at: string | null;
 }
 
@@ -38,7 +45,7 @@ interface RawRow {
   event_id: string;
   notes: string | null;
   status: VenueRequestStatus;
-  contacted_at: string;
+  created_at: string;
   responded_at: string | null;
   events: {
     title: string | null;
@@ -77,11 +84,11 @@ export function useInboxVenueRequests() {
       })
         .from("event_venue_selections")
         .select(
-          `id, event_id, notes, status, contacted_at, responded_at,
+          `id, event_id, notes, status, created_at, responded_at,
            events!inner ( title, date, location, venue, capacity )`,
         )
         .eq("vendor_id", vendor!.id)
-        .order("contacted_at", { ascending: false });
+        .order("created_at", { ascending: false });
 
       if (error) throw error;
       return (data ?? []).map((row) => ({
@@ -97,7 +104,7 @@ export function useInboxVenueRequests() {
         event_capacity: row.events?.capacity ?? null,
         notes: row.notes,
         status: row.status,
-        contacted_at: row.contacted_at,
+        created_at: row.created_at,
         responded_at: row.responded_at,
       }));
     },

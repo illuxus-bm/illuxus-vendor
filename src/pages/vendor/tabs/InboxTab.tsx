@@ -64,7 +64,7 @@ export default function InboxTab() {
     })),
     ...(venueQ.data ?? []).map<InboxItem>((v) => ({
       kind: "venue",
-      sortKey: v.contacted_at,
+      sortKey: v.created_at,
       venue: v,
     })),
   ].sort((a, b) => b.sortKey.localeCompare(a.sortKey));
@@ -329,7 +329,7 @@ function VenueRequestRow({ request }: { request: InboxVenueRequest }) {
               Venue request
             </Badge>
             <span className="text-xs text-muted-foreground">
-              {formatDistanceToNow(new Date(request.contacted_at), {
+              {formatDistanceToNow(new Date(request.created_at), {
                 addSuffix: true,
               })}
             </span>
