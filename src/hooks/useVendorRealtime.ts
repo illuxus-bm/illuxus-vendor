@@ -28,6 +28,24 @@ export function useVendorRealtime() {
           qc.invalidateQueries({ queryKey: ["vendor-stats", vendor.id] });
         },
       )
+      // Direct venue picks from the main app's marketplace live in
+      // event_venue_selections. They surface alongside RFQs in the Inbox,
+      // and an accept flips the vendor's availability calendar, so both
+      // query keys need to refresh together.
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "event_venue_selections",
+          filter: `vendor_id=eq.${vendor.id}`,
+        },
+        () => {
+          qc.invalidateQueries({ queryKey: ["vendor-inbox-venues", vendor.id] });
+          qc.invalidateQueries({ queryKey: ["vendor-stats", vendor.id] });
+          qc.invalidateQueries({ queryKey: ["vendor-availability", vendor.id] });
+        },
+      )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "quotes", filter: `vendor_id=eq.${vendor.id}` },
