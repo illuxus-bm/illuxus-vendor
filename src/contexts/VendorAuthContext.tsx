@@ -6,6 +6,47 @@ import type { Database } from "@/integrations/supabase/types";
 
 type Vendor = Database["public"]["Tables"]["vendors"]["Row"];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Email allowlist — vendor portal is invite-only.
+// ─────────────────────────────────────────────────────────────────────────────
+// The vendor portal shares its Supabase project with the main Illuxus app, so
+// anyone with an auth.users row could otherwise try to sign in here. We gate
+// every entry point (sign-in, sign-up, existing-account link) behind an
+// explicit email allowlist. The default list ships one address so the portal
+// works out of the box for the seed vendor; production deployments can
+// override with `VITE_VENDOR_ALLOWED_EMAILS` (comma-separated) without a
+// code change.
+//
+// This is a UX gate, not a security boundary. RLS on vendor_* tables is what
+// actually protects the data; a determined attacker with valid credentials
+// could hit the REST API directly. But that user still wouldn't have a
+// vendor_members row and would see nothing — the allowlist just shortens
+// the failure path and shows a clean message instead of the misleading
+// "This email isn't registered as a vendor" that we surface for members-
+// missing accounts.
+const DEFAULT_ALLOWLIST = ["aman@bizmillennium.com"];
+
+const VENDOR_EMAIL_ALLOWLIST: ReadonlySet<string> = new Set(
+  (
+    (import.meta.env.VITE_VENDOR_ALLOWED_EMAILS as string | undefined) ??
+    DEFAULT_ALLOWLIST.join(",")
+  )
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.length > 0),
+);
+
+function isEmailAllowlisted(email: string): boolean {
+  // Empty allowlist === explicitly opt-out (falls back to the vendor_members
+  // check). Non-empty === strict allowlist.
+  if (VENDOR_EMAIL_ALLOWLIST.size === 0) return true;
+  return VENDOR_EMAIL_ALLOWLIST.has(email.trim().toLowerCase());
+}
+
+const ALLOWLIST_REJECTION = new Error(
+  "This email isn't authorized to access the vendor portal. Contact support if you should have access.",
+);
+
 interface SignUpResult {
   error: Error | null;
   /** True when Supabase returned no session — the user must click the
@@ -157,6 +198,15 @@ export function VendorAuthProvider({ children }: { children: React.ReactNode }) 
   const signIn = React.useCallback(
     async (email: string, password: string) => {
       const normalizedEmail = email.trim().toLowerCase();
+
+      // Allowlist gate — short-circuit before we hit Supabase Auth so a
+      // non-allowlisted email never gets a real login attempt (and so we
+      // don't count against auth rate limits for people we're going to
+      // reject anyway).
+      if (!isEmailAllowlisted(normalizedEmail)) {
+        return { error: ALLOWLIST_REJECTION };
+      }
+
       const { data, error } = await supabase.auth.signInWithPassword({
         email: normalizedEmail,
         password,
@@ -211,6 +261,15 @@ export function VendorAuthProvider({ children }: { children: React.ReactNode }) 
   const signUp = React.useCallback(
     async (email: string, password: string, businessName: string) => {
       const normalizedEmail = email.trim().toLowerCase();
+
+      // Signup is disabled for anyone not on the invite list. The DB
+      // trigger on auth.users would happily provision a vendor row
+      // otherwise (see migration 103); this gate is what makes the
+      // portal actually invite-only.
+      if (!isEmailAllowlisted(normalizedEmail)) {
+        return { error: ALLOWLIST_REJECTION };
+      }
+
       const { data, error } = await supabase.auth.signUp({
         email: normalizedEmail,
         password,
@@ -254,8 +313,17 @@ export function VendorAuthProvider({ children }: { children: React.ReactNode }) 
 
   const linkExistingAccount = React.useCallback(
     async (email: string, password: string, businessName: string) => {
+      const normalizedEmail = email.trim().toLowerCase();
+
+      // Same allowlist gate as signIn / signUp — the "link existing Illuxus
+      // account" path would otherwise let any main-app user claim a vendor
+      // profile just by knowing their own password.
+      if (!isEmailAllowlisted(normalizedEmail)) {
+        return { error: ALLOWLIST_REJECTION };
+      }
+
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim().toLowerCase(),
+        email: normalizedEmail,
         password,
       });
       if (error) {
