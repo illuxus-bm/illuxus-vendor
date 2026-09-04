@@ -29,7 +29,23 @@ export interface InboxVenueRequestService {
   title: string;
 }
 
-export interface InboxVenueRequest {
+/** Venue-booking brief the organizer filled in on step 2 of Quick Create.
+ *  Every field is optional / boolean-with-default; the vendor UI hides
+ *  rows that are unset so old requests predating migration 035 render
+ *  identically to how they used to. */
+export interface InboxVenueRequestBrief {
+  event_type: string | null;
+  event_duration_hours: number | null;
+  expected_attendees: number | null;
+  seating_capacity: number | null;
+  seating_arrangement: string | null;
+  needs_pre_function_area: boolean;
+  needs_vip_area: boolean;
+  needs_additional_rooms: boolean;
+  venue_link: string | null;
+}
+
+export interface InboxVenueRequest extends InboxVenueRequestBrief {
   selection_id: string;
   event_id: string;
   event_title: string | null;
@@ -58,6 +74,15 @@ interface RawRow {
   created_at: string;
   responded_at: string | null;
   selected_service_ids: string[] | null;
+  event_type: string | null;
+  event_duration_hours: number | null;
+  expected_attendees: number | null;
+  seating_capacity: number | null;
+  seating_arrangement: string | null;
+  needs_pre_function_area: boolean | null;
+  needs_vip_area: boolean | null;
+  needs_additional_rooms: boolean | null;
+  venue_link: string | null;
   events: {
     title: string | null;
     date: string | null;
@@ -97,6 +122,10 @@ export function useInboxVenueRequests() {
         .select(
           `id, event_id, notes, status, created_at, responded_at,
            selected_service_ids,
+           event_type, event_duration_hours, expected_attendees,
+           seating_capacity, seating_arrangement,
+           needs_pre_function_area, needs_vip_area, needs_additional_rooms,
+           venue_link,
            events!inner ( title, date, location, venue, capacity )`,
         )
         .eq("vendor_id", vendor!.id)
@@ -168,6 +197,18 @@ export function useInboxVenueRequests() {
             return title ? { id, title } : null;
           })
           .filter((s): s is InboxVenueRequestService => s !== null),
+        // Brief fields — migration 035. Nullable-boolean columns are
+        // coerced to strict booleans so consumers can trust them without
+        // an `?? false` at every read.
+        event_type: row.event_type,
+        event_duration_hours: row.event_duration_hours,
+        expected_attendees: row.expected_attendees,
+        seating_capacity: row.seating_capacity,
+        seating_arrangement: row.seating_arrangement,
+        needs_pre_function_area: row.needs_pre_function_area ?? false,
+        needs_vip_area: row.needs_vip_area ?? false,
+        needs_additional_rooms: row.needs_additional_rooms ?? false,
+        venue_link: row.venue_link,
       }));
     },
   });

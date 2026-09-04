@@ -17,6 +17,7 @@ import {
   useInboxVenueRequests,
   type InboxVenueRequest,
 } from "@/hooks/useInboxVenueRequests";
+import { VenueBriefSummary } from "@/components/vendor/VenueBriefSummary";
 import { formatMoneyCents } from "@/lib/utils";
 
 type Filter = "new" | "responded" | "expired";
@@ -388,6 +389,11 @@ function VenueRequestRow({ request }: { request: InboxVenueRequest }) {
               ))}
             </div>
           ) : null}
+
+          {/* Venue-booking brief the organizer filled on step 2 of
+              Quick Create (migration 035). Anything unset is hidden so
+              old requests keep rendering cleanly. */}
+          <VenueBriefSummary request={request} />
 
           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
             {request.event_city ? (

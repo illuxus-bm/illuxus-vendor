@@ -29,6 +29,7 @@ import {
   useInboxVenueRequests,
   type InboxVenueRequest,
 } from "@/hooks/useInboxVenueRequests";
+import { VenueBriefSummary } from "@/components/vendor/VenueBriefSummary";
 import { formatMoneyCents } from "@/lib/utils";
 import { Building2, ListChecks, MapPin, Users } from "lucide-react";
 
@@ -194,6 +195,8 @@ function VenueBookingRow({ request }: { request: InboxVenueRequest }) {
               ))}
             </div>
           ) : null}
+
+          <VenueBriefSummary request={request} />
 
           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
             {request.event_city ? (
