@@ -241,7 +241,9 @@ export function useAddVenueMedia() {
     },
     onSuccess: (_v, vars) => {
       qc.invalidateQueries({ queryKey: ["venue-media", vars.venue_id] });
-      toast.success("Media added");
+      // Success toast is owned by the caller — batch uploads would
+      // otherwise spawn one toast per file. Errors still toast here
+      // because the caller may fire-and-forget.
     },
     onError: (err) => toast.error(err.message ?? "Could not add media"),
   });

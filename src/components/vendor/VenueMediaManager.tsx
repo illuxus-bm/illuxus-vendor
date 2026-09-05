@@ -69,6 +69,10 @@ export function VenueMediaManager({
   const { vendor } = useVendorAuth();
 
   const [uploading, setUploading] = React.useState(false);
+  // Batch progress: "3 / 8" while multiple files are working through.
+  // Null when no batch is running so the label falls back to "Uploading…".
+  const [uploadProgress, setUploadProgress] =
+    React.useState<{ done: number; total: number } | null>(null);
   const [pendingKind, setPendingKind] = React.useState<VenueMediaKind>("empty_hall");
   const [caption, setCaption] = React.useState("");
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -85,42 +89,94 @@ export function VenueMediaManager({
     return buckets;
   }, [media]);
 
-  const uploadFile = async (file: File) => {
+  /**
+   * Upload one or many files in a single batch. Every file in the batch
+   * gets the same media_kind and caption (that's how the OS file picker
+   * lets you multi-select — it's implicitly one intent, one label).
+   *
+   * Sequential rather than parallel: keeps the "first upload becomes
+   * cover" logic simple (no race between two uploads racing to be
+   * cover) and gives progress reporting a clean tick. Individual
+   * failures don't abort the batch — they're toasted and skipped.
+   */
+  const uploadFiles = async (files: FileList) => {
     if (!vendor?.id) return;
+    const list = Array.from(files);
+    if (list.length === 0) return;
+
     setUploading(true);
-    try {
-      const ext = file.name.split(".").pop()?.toLowerCase() ?? "bin";
-      // Path shape: `<venue_id>/<uuid>.<ext>`. Keeps files grouped per
-      // venue for easy inspection in the Storage dashboard and matches
-      // the storage RLS that scopes writes by object owner.
-      const objectName = `${venueId}/${crypto.randomUUID()}.${ext}`;
-      const { error: upErr } = await supabase.storage
-        .from(STORAGE_BUCKET)
-        .upload(objectName, file, {
-          cacheControl: "3600",
-          upsert: false,
-          contentType: file.type || undefined,
+    setUploadProgress({ done: 0, total: list.length });
+
+    // Track cover assignment as we go: only the very first successfully-
+    // uploaded file in the batch becomes cover, and only when the venue
+    // has no existing cover. Reading the local `media` snapshot is fine
+    // here since a) it's fresh from the react-query cache and b) each
+    // subsequent addMedia invalidates the query so future opens see it.
+    let alreadyHasCover = media.some((m) => m.is_cover);
+    let failures = 0;
+
+    for (let i = 0; i < list.length; i++) {
+      const file = list[i];
+      try {
+        const ext = file.name.split(".").pop()?.toLowerCase() ?? "bin";
+        // Path shape: `<venue_id>/<uuid>.<ext>`. Keeps files grouped per
+        // venue for easy inspection in the Storage dashboard and matches
+        // the storage RLS that scopes writes by object owner.
+        const objectName = `${venueId}/${crypto.randomUUID()}.${ext}`;
+
+        const { error: upErr } = await supabase.storage
+          .from(STORAGE_BUCKET)
+          .upload(objectName, file, {
+            cacheControl: "3600",
+            upsert: false,
+            contentType: file.type || undefined,
+          });
+        if (upErr) {
+          toast.error(`${file.name}: ${upErr.message ?? "Upload failed"}`);
+          failures += 1;
+          continue;
+        }
+
+        const { data: publicUrl } = supabase.storage
+          .from(STORAGE_BUCKET)
+          .getPublicUrl(objectName);
+
+        const shouldCover = !alreadyHasCover;
+        await addMedia.mutateAsync({
+          venue_id: venueId,
+          url: publicUrl.publicUrl,
+          media_kind: pendingKind,
+          caption: caption.trim() || undefined,
+          is_cover: shouldCover,
         });
-      if (upErr) {
-        toast.error(upErr.message ?? "Upload failed");
-        return;
+        if (shouldCover) alreadyHasCover = true;
+      } finally {
+        setUploadProgress({ done: i + 1, total: list.length });
       }
-      const { data: publicUrl } = supabase.storage
-        .from(STORAGE_BUCKET)
-        .getPublicUrl(objectName);
-      await addMedia.mutateAsync({
-        venue_id: venueId,
-        url: publicUrl.publicUrl,
-        media_kind: pendingKind,
-        caption: caption.trim() || undefined,
-        // First upload per venue auto-covers so the marketplace card has
-        // an image without an explicit "make cover" click.
-        is_cover: media.length === 0,
-      });
-      setCaption("");
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    } finally {
-      setUploading(false);
+    }
+
+    setUploading(false);
+    setUploadProgress(null);
+
+    // Only clear the caption on a fully-successful batch so a partial
+    // failure doesn't force the user to retype what they had.
+    if (failures === 0) setCaption("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+
+    // Single summary toast covers both the all-success and partial
+    // failure paths. Per-file success toasts are suppressed in the hook
+    // to avoid a stack of them on a large batch.
+    const succeeded = list.length - failures;
+    if (succeeded > 0 && failures === 0) {
+      toast.success(
+        succeeded === 1
+          ? "Media added"
+          : `Added ${succeeded} media`,
+      );
+    } else if (succeeded > 0 && failures > 0) {
+      toast.success(
+        `Added ${succeeded} of ${list.length} — ${failures} failed`,
+      );
     }
   };
 
@@ -202,21 +258,28 @@ export function VenueMediaManager({
               ref={fileInputRef}
               type="file"
               accept="image/*,application/pdf"
+              multiple
               disabled={uploading}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                const f = e.target.files?.[0];
-                if (f) uploadFile(f);
+                if (e.target.files && e.target.files.length > 0) {
+                  uploadFiles(e.target.files);
+                }
               }}
               className="text-sm file:mr-3 file:rounded-md file:border file:border-input file:bg-background file:px-3 file:py-1.5 file:text-sm file:cursor-pointer"
             />
             {uploading && (
               <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                <Loader2 className="h-3 w-3 animate-spin" /> Uploading…
+                <Loader2 className="h-3 w-3 animate-spin" />
+                {uploadProgress
+                  ? `Uploading ${uploadProgress.done} / ${uploadProgress.total}…`
+                  : "Uploading…"}
               </span>
             )}
           </div>
           <p className="text-[11px] text-muted-foreground">
-            PDF works for floor plans. Images are recommended for hall / setup / facility.
+            Pick multiple files at once — every file in the batch is saved
+            with the same kind and caption. PDF works for floor plans;
+            images are recommended for hall / setup / facility.
           </p>
         </div>
 
