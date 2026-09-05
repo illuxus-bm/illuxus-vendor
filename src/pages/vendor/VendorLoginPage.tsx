@@ -80,14 +80,12 @@ export default function VendorLoginPage() {
   return (
     <AuthShell
       footer={
+        // Vendor portal is invite-only — no signup link. The signup route
+        // is still mounted (as an invite-only stub) so people hitting an
+        // old bookmark land on a clear message rather than a 404.
         <>
-          New here?{" "}
-          <Link
-            to="/vendor/signup"
-            className="font-medium text-foreground hover:underline"
-          >
-            Create a vendor account
-          </Link>
+          Vendor accounts are invite-only. Please contact support if you
+          should have access.
         </>
       }
     >
@@ -136,13 +134,7 @@ export default function VendorLoginPage() {
 
         {formError && isNotAVendorError(formError) ? (
           <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-            {formError}{" "}
-            <Link
-              to="/vendor/signup"
-              className="font-medium text-amber-900 underline underline-offset-2"
-            >
-              Create a vendor account →
-            </Link>
+            {formError} If you should have vendor access, contact support.
           </div>
         ) : null}
 

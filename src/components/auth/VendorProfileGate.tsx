@@ -40,23 +40,18 @@ export function VendorProfileGate({ children }: { children: React.ReactNode }) {
           <AlertCircle className="h-5 w-5" />
         </div>
         <h1 className="text-xl font-semibold tracking-tight">
-          Not registered as a vendor
+          Not authorized for the vendor portal
         </h1>
         <p className="text-sm text-muted-foreground">
           You're signed in as{" "}
-          <span className="font-medium text-foreground">{user.email}</span>, but
-          this account isn't registered on Vendor Connect yet. Vendor
-          businesses are separate from Illuxus organizer accounts.
+          <span className="font-medium text-foreground">{user.email}</span>,
+          but this account isn't invited to the Illuxus vendor portal. The
+          portal is invite-only; contact your Illuxus contact if you should
+          have access.
         </p>
       </div>
 
       <div className="mt-8 space-y-2">
-        <Button
-          className="w-full"
-          onClick={() => navigate("/vendor/signup")}
-        >
-          Create a vendor business
-        </Button>
         <Button
           variant="outline"
           className="w-full"
