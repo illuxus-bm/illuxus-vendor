@@ -13,7 +13,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -123,8 +122,16 @@ export function VenueEditorDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
+      <DialogContent
+        className={
+          // Kill the base p-6 + gap-4 grid layout so we can lay out
+          // header / scrollable body / footer as a proper flex column.
+          // p-0 lets the sticky header + footer own their own padding
+          // and the middle area own its scroll.
+          "sm:max-w-2xl flex flex-col p-0 gap-0 max-h-[85vh]"
+        }
+      >
+        <DialogHeader className="px-6 pt-6 pb-4 border-b border-border">
           <DialogTitle>{venue ? `Edit ${venue.name}` : "Add a venue"}</DialogTitle>
           <DialogDescription>
             Everything below is shown to organizers on the marketplace card
@@ -133,8 +140,8 @@ export function VenueEditorDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <ScrollArea className="max-h-[70vh] pr-2">
-          <div className="space-y-6 py-2">
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          <div className="space-y-6">
             {/* ─── Section 1: Identity ─── */}
             <FieldSet title="1 · Identity" hint="Name and headline description of this specific space.">
               <div className="grid gap-3 sm:grid-cols-2">
@@ -375,9 +382,9 @@ export function VenueEditorDialog({
               )}
             </FieldSet>
           </div>
-        </ScrollArea>
+        </div>
 
-        <DialogFooter className="gap-2 sm:gap-0">
+        <DialogFooter className="px-6 py-4 border-t border-border gap-2 sm:gap-2">
           <Button
             variant="ghost"
             onClick={() => onOpenChange(false)}

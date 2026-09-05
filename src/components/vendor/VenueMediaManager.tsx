@@ -147,8 +147,10 @@ export function VenueMediaManager({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl">
-        <DialogHeader>
+      <DialogContent
+        className="sm:max-w-3xl flex flex-col p-0 gap-0 max-h-[85vh]"
+      >
+        <DialogHeader className="px-6 pt-6 pb-4 border-b border-border">
           <DialogTitle>Media · {venueName}</DialogTitle>
           <DialogDescription>
             Upload empty-hall shots, setup examples, facility photos, and a
@@ -157,6 +159,7 @@ export function VenueMediaManager({
           </DialogDescription>
         </DialogHeader>
 
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
         {/* ─── Upload row ─── */}
         <div className="rounded-lg border border-dashed border-border p-3 space-y-3">
           <div className="grid gap-3 sm:grid-cols-2">
@@ -304,8 +307,9 @@ export function VenueMediaManager({
             ))}
           </div>
         )}
+        </div>
 
-        <DialogFooter>
+        <DialogFooter className="px-6 py-4 border-t border-border gap-2 sm:gap-2">
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Done
           </Button>
