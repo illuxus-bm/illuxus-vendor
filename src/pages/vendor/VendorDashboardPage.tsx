@@ -1,5 +1,6 @@
 import * as React from "react";
 import {
+  Building2,
   CalendarCheck,
   CalendarX,
   Image as ImageIcon,
@@ -20,6 +21,7 @@ import OverviewTab from "@/pages/vendor/tabs/OverviewTab";
 import InboxTab from "@/pages/vendor/tabs/InboxTab";
 import QuotesTab from "@/pages/vendor/tabs/QuotesTab";
 import BookingsTab from "@/pages/vendor/tabs/BookingsTab";
+import VenuesTab from "@/pages/vendor/tabs/VenuesTab";
 import ServicesTab from "@/pages/vendor/tabs/ServicesTab";
 import PortfolioTab from "@/pages/vendor/tabs/PortfolioTab";
 import AvailabilityTab from "@/pages/vendor/tabs/AvailabilityTab";
@@ -27,11 +29,15 @@ import ReviewsTab from "@/pages/vendor/tabs/ReviewsTab";
 import ProfileTab from "@/pages/vendor/tabs/ProfileTab";
 
 // One place to add / rearrange tabs. Order matches the screenshots.
+// Venues sits between Bookings and Services because the vendor's mental
+// model is: "here's what's booked → here's what I have → here are the
+// add-on services on it".
 const TABS = [
   { value: "overview", label: "Overview", icon: LayoutGrid, Component: OverviewTab },
   { value: "inbox", label: "Inbox", icon: Inbox, Component: InboxTab },
   { value: "quotes", label: "Quotes", icon: ScrollText, Component: QuotesTab },
   { value: "bookings", label: "Bookings", icon: CalendarCheck, Component: BookingsTab },
+  { value: "venues", label: "Venues", icon: Building2, Component: VenuesTab },
   { value: "services", label: "Services", icon: Tag, Component: ServicesTab },
   { value: "portfolio", label: "Portfolio", icon: ImageIcon, Component: PortfolioTab },
   { value: "availability", label: "Availability", icon: CalendarX, Component: AvailabilityTab },
