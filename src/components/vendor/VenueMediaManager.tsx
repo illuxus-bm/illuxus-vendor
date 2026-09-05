@@ -36,10 +36,10 @@ import { useVendorAuth } from "@/contexts/VendorAuthContext";
  *   1. Show the existing photos + floor plan grouped by media_kind.
  *   2. Upload new files → Supabase Storage → insert a venue_media row.
  *
- * The upload uses the existing `vendor-portfolio` public bucket (created
- * back in migration 100) namespaced under `venues/<venue_id>/<uuid>-<name>`.
- * That keeps files isolated per venue and avoids clashing with the
- * vendor-level portfolio bucket paths.
+ * Uses the `venue-media` public bucket (created by migration 107) with
+ * paths shaped like `<venue_id>/<uuid>.<ext>`. Public read on the bucket
+ * so the main app's marketplace can render URLs directly; per-object
+ * update / delete guarded by owner in storage RLS.
  */
 
 const KIND_OPTIONS: Array<{ value: VenueMediaKind; label: string; hint: string }> = [
@@ -50,7 +50,7 @@ const KIND_OPTIONS: Array<{ value: VenueMediaKind; label: string; hint: string }
   { value: "other",      label: "Other",         hint: "Anything else worth showing" },
 ];
 
-const STORAGE_BUCKET = "vendor-portfolio";
+const STORAGE_BUCKET = "venue-media";
 
 export function VenueMediaManager({
   open,
@@ -90,7 +90,10 @@ export function VenueMediaManager({
     setUploading(true);
     try {
       const ext = file.name.split(".").pop()?.toLowerCase() ?? "bin";
-      const objectName = `venues/${venueId}/${crypto.randomUUID()}.${ext}`;
+      // Path shape: `<venue_id>/<uuid>.<ext>`. Keeps files grouped per
+      // venue for easy inspection in the Storage dashboard and matches
+      // the storage RLS that scopes writes by object owner.
+      const objectName = `${venueId}/${crypto.randomUUID()}.${ext}`;
       const { error: upErr } = await supabase.storage
         .from(STORAGE_BUCKET)
         .upload(objectName, file, {
